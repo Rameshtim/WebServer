@@ -8,11 +8,42 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#include <fcntl.h>
+#include <sys/sendfile.h>
 
 #define MAX_EVENTS 4096
 
+void send_http_response_with_file(int client_fd, const char *file_name) {
+    int file_fd = open("hey.html", O_RDONLY);
+    if (file_fd == -1) {
+        const char* not_found_response =
+            "HTTP/1.1 404 Not Found\r\n"
+            "Content-Type: text/html\r\n"
+            "Content-Length: 100\r\n"
+            "\r\n"
+            "<h1>404 Page not found. Hahahaha</h1>\n";
+    send(client_fd, not_found_response, strlen(not_found_response), 0);
+    return;
+    }
+	off_t file_size = lseek(file_fd, 0, SEEK_END); // get file size
+	lseek(file_fd, 0, SEEK_SET); // reset file pointer to start
+
+	char header[256]; //send HTTP header response
+	int header_len = snprintf(header, sizeof(header),
+        "HTTP/1.1 200 OK\r\n"
+        "Content-Type: text/html\r\n"
+        "Content-Length: %ld\r\n"
+        "\r\n", file_size);
+	// send (client_fd, header, header_len, 0);
+
+	//use sendfile to send the file directly from the fd to socket
+	// sendfile(client_fd, file_fd, NULL, file_size);
+
+	close(file_fd);
+}
+
 void handle_data(int client_fd) {
-    char buffer[1024];
+    char buffer[1024] = {0};
     ssize_t bytes_received;
 
     // Receive data from client
@@ -28,11 +59,15 @@ void handle_data(int client_fd) {
         close(client_fd);
     } else {
         // Process received data
+		if (strncmp(buffer, "GET /", 5) == 0) {
+			send_http_response_with_file(client_fd, "hey.html");
+		}
         printf("Received data from client: %.*s\n", (int)bytes_received, buffer);
 
         // Echo back to the client
         send(client_fd, buffer, bytes_received, 0);
     }
+	close(client_fd);
 }
 
 int create_and_bind_socket(const char *port) {
@@ -66,6 +101,10 @@ int create_and_bind_socket(const char *port) {
 
     return listen_fd;
 }
+
+
+
+
 
 int main() {
     int epoll_fd = epoll_create(42); //could be anything but zero (it's ignored)
